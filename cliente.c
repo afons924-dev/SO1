@@ -67,6 +67,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (pid == 0) { // Filho: Recebe mensagens
+        signal(SIGTERM, handle_sigint_cliente); // Usa o mesmo handler para terminação limpa
         fd_fifo_cliente = open(fifo_cliente_nome, O_RDONLY);
         if (fd_fifo_cliente == -1) {
             perror("Filho: Erro ao abrir FIFO do cliente"); exit(1);

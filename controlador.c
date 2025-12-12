@@ -17,6 +17,7 @@
 #define MAX_VIAGENS 100
 #define MAX_VEICULOS_DEFAULT 10
 #define BUFFER_SIZE 1024
+#define LOCK_FILE "/tmp/controlador.lock"
 
 typedef enum { AGENDADA, EM_CURSO, CONCLUIDA, CANCELADA } EstadoViagem;
 typedef struct { char username[50]; char fifo_nome[100]; int fd_fifo; int em_viagem; } Utilizador;
@@ -41,6 +42,18 @@ int main() {
 }
 
 void inicializar_controlador() {
+    // Verifica se já existe outra instância a correr
+    int lock_fd = open(LOCK_FILE, O_CREAT | O_EXCL, 0666);
+    if (lock_fd == -1) {
+        if (errno == EEXIST) {
+            printf("Erro: Outra instancia do controlador ja esta em execucao.\n");
+        } else {
+            perror("Erro ao criar lock file");
+        }
+        exit(1);
+    }
+    close(lock_fd); // O ficheiro só precisa de existir
+
     printf("A iniciar o controlador...\n");
     char *nveiculos_env = getenv("NVEICULOS");
     nveiculos_max = nveiculos_env ? atoi(nveiculos_env) : MAX_VEICULOS_DEFAULT;
@@ -170,12 +183,31 @@ void adicionar_utilizador(char* username, char* fifo_nome) {
 }
 
 void remover_utilizador(char* username) {
-    int idx = -1; for(int i=0; i<num_utilizadores; i++) if(strcmp(lista_utilizadores[i].username, username)==0) { idx=i; break; }
-    if (idx != -1) {
-        close(lista_utilizadores[idx].fd_fifo);
-        for(int i=idx; i<num_utilizadores-1; i++) lista_utilizadores[i] = lista_utilizadores[i+1];
-        num_utilizadores--; printf("User '%s' removido.\n", username);
+    Utilizador* u = encontrar_utilizador(username);
+    if (!u) return;
+
+    // Verifica se o utilizador está em viagem
+    if (u->em_viagem) {
+        write(u->fd_fifo, "Erro: Nao pode sair enquanto estiver em viagem.", 46);
+        return;
     }
+
+    // Cancela todas as viagens agendadas do utilizador
+    for (int i=0; i<num_viagens; i++) {
+        if (strcmp(lista_viagens[i].username_cliente, username) == 0 && lista_viagens[i].estado == AGENDADA) {
+            lista_viagens[i].estado = CANCELADA;
+        }
+    }
+    printf("Viagens agendadas para '%s' canceladas.\n", username);
+
+    // Remove o utilizador
+    int idx = u - lista_utilizadores; // Calcula o índice do utilizador
+    close(u->fd_fifo);
+    for(int i=idx; i<num_utilizadores-1; i++) {
+        lista_utilizadores[i] = lista_utilizadores[i+1];
+    }
+    num_utilizadores--;
+    printf("User '%s' removido.\n", username);
 }
 
 void agendar_viagem(char* username, int hora, char* local, int dist) {
@@ -246,7 +278,9 @@ void terminar_sistema() {
         close(lista_utilizadores[i].fd_fifo);
     }
     for (int i=0; i<num_viagens; i++) if (lista_viagens[i].estado == EM_CURSO) kill(lista_viagens[i].pid_veiculo, SIGUSR1);
-    unlink(FIFO_PRINCIPAL); printf("Sistema terminado.\n");
+    unlink(FIFO_PRINCIPAL);
+    unlink(LOCK_FILE); // Remove o lock file
+    printf("Sistema terminado.\n");
 }
 
 Utilizador* encontrar_utilizador(char* username) {
