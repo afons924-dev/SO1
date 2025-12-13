@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
             fflush(stdout);
             fd_fifo_cliente = open(fifo_cliente_nome, O_WRONLY);
             if (fd_fifo_cliente != -1) {
-                write(fd_fifo_cliente, "A sua viagem foi cancelada pelo administrador.", 45);
+                write(fd_fifo_cliente, "A sua viagem foi cancelada.", 27);
                 close(fd_fifo_cliente);
             }
             return 0;

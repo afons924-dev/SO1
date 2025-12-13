@@ -103,9 +103,14 @@ int main(int argc, char *argv[]) {
                 write(fd_fifo_principal, msg_terminar, strlen(msg_terminar));
                 break;
             } else {
-                char mensagem_comando[512];
-                snprintf(mensagem_comando, sizeof(mensagem_comando), "%s %s", username, comando);
-                write(fd_fifo_principal, mensagem_comando, strlen(mensagem_comando));
+                // Antes de enviar, verifica se é um comando conhecido para evitar lixo
+                if (strncmp(comando, "agendar", 7) == 0 || strcmp(comando, "consultar") == 0 || strncmp(comando, "cancelar", 8) == 0) {
+                    char mensagem_comando[512];
+                    snprintf(mensagem_comando, sizeof(mensagem_comando), "%s %s", username, comando);
+                    write(fd_fifo_principal, mensagem_comando, strlen(mensagem_comando));
+                } else {
+                    printf("Comando desconhecido. Use 'help' para ver a lista de comandos.\n");
+                }
             }
         }
         kill(pid, SIGTERM);

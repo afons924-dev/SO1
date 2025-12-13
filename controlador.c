@@ -33,6 +33,7 @@ void lancar_veiculo(Viagem *v); void adicionar_utilizador(char* username, char* 
 void remover_utilizador(char* username); void agendar_viagem(char* username, int hora, char* local, int dist);
 void consultar_viagens(char* username); void cancelar_viagem(int id_viagem, char* requisitante);
 Utilizador* encontrar_utilizador(char* username); Viagem* encontrar_viagem(int id);
+void trim(char *str);
 
 int main() {
     inicializar_controlador();
@@ -42,18 +43,13 @@ int main() {
 }
 
 void inicializar_controlador() {
-    // Verifica se já existe outra instância a correr
     int lock_fd = open(LOCK_FILE, O_CREAT | O_EXCL, 0666);
     if (lock_fd == -1) {
-        if (errno == EEXIST) {
-            printf("Erro: Outra instancia do controlador ja esta em execucao.\n");
-        } else {
-            perror("Erro ao criar lock file");
-        }
+        if (errno == EEXIST) printf("Erro: Outra instancia do controlador ja esta em execucao.\n");
+        else perror("Erro ao criar lock file");
         exit(1);
     }
-    close(lock_fd); // O ficheiro só precisa de existir
-
+    close(lock_fd);
     printf("A iniciar o controlador...\n");
     char *nveiculos_env = getenv("NVEICULOS");
     nveiculos_max = nveiculos_env ? atoi(nveiculos_env) : MAX_VEICULOS_DEFAULT;
@@ -114,7 +110,9 @@ void loop_principal() {
 }
 
 void processar_comandos_admin(char* cmd) {
-    cmd[strcspn(cmd, "\n")] = 0; printf("\n[ADMIN] %s\n", cmd); int id;
+    trim(cmd);
+    printf("\n[ADMIN] %s\n", cmd);
+    int id;
     if (strcmp(cmd, "help") == 0) {
         printf("--- Comandos do Administrador ---\n");
         printf("  listar         - Mostra a informacao de todos os servicos agendados/em curso.\n");
@@ -138,12 +136,15 @@ void processar_comandos_admin(char* cmd) {
     else if (strcmp(cmd, "frota") == 0) {
         printf("--- Frota (%d/%d) ---\n", veiculos_em_servico, nveiculos_max);
         for(int i=0; i<num_viagens; i++) if(lista_viagens[i].estado == EM_CURSO) printf("ID:%d P:%d%%\n", lista_viagens[i].id, lista_viagens[i].progresso);
+    } else {
+        printf("Comando de administrador desconhecido. Use 'help' para ver a lista.\n");
     }
     printf("> "); fflush(stdout);
 }
 
 void processar_comandos_clientes(char* cmd) {
-    cmd[strcspn(cmd, "\n")] = 0; printf("\n[CLIENTE] %s\n", cmd);
+    trim(cmd);
+    printf("\n[CLIENTE] %s\n", cmd);
     char* cmd_copy = strdup(cmd); char* token = strtok(cmd_copy, " ");
     if (!token) { free(cmd_copy); return; }
     if (strcmp(token, "LOGIN") == 0) {
@@ -173,35 +174,37 @@ void processar_comandos_clientes(char* cmd) {
 }
 
 void adicionar_utilizador(char* username, char* fifo_nome) {
-    if (num_utilizadores >= MAX_UTILIZADORES) return;
-    for (int i=0; i<num_utilizadores; i++) if (strcmp(lista_utilizadores[i].username, username)==0) return;
+    if (num_utilizadores >= MAX_UTILIZADORES) {
+        int fd_temp = open(fifo_nome, O_WRONLY);
+        if (fd_temp != -1) { write(fd_temp, "Erro: Limite de utilizadores atingido.", 38); close(fd_temp); }
+        return;
+    }
+    if (encontrar_utilizador(username) != NULL) {
+        int fd_temp = open(fifo_nome, O_WRONLY);
+        if (fd_temp != -1) { write(fd_temp, "Erro: Username ja esta em uso.", 30); close(fd_temp); }
+        return;
+    }
     Utilizador* u = &lista_utilizadores[num_utilizadores];
     strcpy(u->username, username); strcpy(u->fifo_nome, fifo_nome); u->em_viagem = 0;
     u->fd_fifo = open(fifo_nome, O_WRONLY); if (u->fd_fifo == -1) return;
     num_utilizadores++; printf("User '%s' adicionado.\n", username);
-    write(u->fd_fifo, "Login OK", 8);
+    write(u->fd_fifo, "Login bem-sucedido!", 19);
 }
 
 void remover_utilizador(char* username) {
     Utilizador* u = encontrar_utilizador(username);
     if (!u) return;
-
-    // Verifica se o utilizador está em viagem
     if (u->em_viagem) {
         write(u->fd_fifo, "Erro: Nao pode sair enquanto estiver em viagem.", 46);
         return;
     }
-
-    // Cancela todas as viagens agendadas do utilizador
     for (int i=0; i<num_viagens; i++) {
         if (strcmp(lista_viagens[i].username_cliente, username) == 0 && lista_viagens[i].estado == AGENDADA) {
             lista_viagens[i].estado = CANCELADA;
         }
     }
     printf("Viagens agendadas para '%s' canceladas.\n", username);
-
-    // Remove o utilizador
-    int idx = u - lista_utilizadores; // Calcula o índice do utilizador
+    int idx = u - lista_utilizadores;
     close(u->fd_fifo);
     for(int i=idx; i<num_utilizadores-1; i++) {
         lista_utilizadores[i] = lista_utilizadores[i+1];
@@ -211,9 +214,15 @@ void remover_utilizador(char* username) {
 }
 
 void agendar_viagem(char* username, int hora, char* local, int dist) {
-    if (num_viagens >= MAX_VIAGENS) return;
-    Utilizador* u = encontrar_utilizador(username);
-    if (!u) return;
+    Utilizador* u = encontrar_utilizador(username); if (!u) return;
+    if (hora < tempo_simulado) {
+        write(u->fd_fifo, "Erro: Nao pode agendar viagens para o passado.", 46);
+        return;
+    }
+    if (num_viagens >= MAX_VIAGENS) {
+        write(u->fd_fifo, "Erro: Sistema de agendamento cheio.", 35);
+        return;
+    }
     Viagem* v = &lista_viagens[num_viagens];
     v->id = proximo_id_viagem++; strcpy(v->username_cliente, username); v->hora_inicio = hora;
     strcpy(v->local_partida, local); v->distancia = dist; v->estado = AGENDADA; v->progresso = 0;
@@ -226,11 +235,16 @@ void consultar_viagens(char* username) {
     Utilizador* u = encontrar_utilizador(username); if (!u) return;
     char buffer[BUFFER_SIZE]; int len = 0;
     len += snprintf(buffer + len, BUFFER_SIZE - len, "--- As suas viagens ---\n");
+    int encontrou = 0;
     for(int i=0; i<num_viagens; i++) {
         if(strcmp(lista_viagens[i].username_cliente, username)==0) {
+            encontrou = 1;
             len += snprintf(buffer + len, BUFFER_SIZE - len, "ID:%d H:%d E:%d P:%d%%\n", lista_viagens[i].id, lista_viagens[i].hora_inicio, lista_viagens[i].estado, lista_viagens[i].progresso);
             if (len >= BUFFER_SIZE) break;
         }
+    }
+    if (!encontrou) {
+        len += snprintf(buffer + len, BUFFER_SIZE - len, "Nao tem viagens agendadas.\n");
     }
     write(u->fd_fifo, buffer, len);
 }
@@ -239,7 +253,8 @@ void cancelar_viagem(int id_viagem, char* requisitante) {
     if (id_viagem == 0) {
         for(int i=0; i<num_viagens; i++) {
             if (strcmp(requisitante, "admin") == 0 || strcmp(lista_viagens[i].username_cliente, requisitante) == 0) {
-                 cancelar_viagem(lista_viagens[i].id, requisitante);
+                 if(lista_viagens[i].estado == AGENDADA || lista_viagens[i].estado == EM_CURSO)
+                    cancelar_viagem(lista_viagens[i].id, requisitante);
             }
         }
         return;
@@ -279,7 +294,7 @@ void terminar_sistema() {
     }
     for (int i=0; i<num_viagens; i++) if (lista_viagens[i].estado == EM_CURSO) kill(lista_viagens[i].pid_veiculo, SIGUSR1);
     unlink(FIFO_PRINCIPAL);
-    unlink(LOCK_FILE); // Remove o lock file
+    unlink(LOCK_FILE);
     printf("Sistema terminado.\n");
 }
 
@@ -291,4 +306,12 @@ Utilizador* encontrar_utilizador(char* username) {
 Viagem* encontrar_viagem(int id) {
     for (int i=0; i<num_viagens; i++) if (lista_viagens[i].id == id) return &lista_viagens[i];
     return NULL;
+}
+
+void trim(char *str) {
+    char *start, *end;
+    for (start = str; *start && isspace(*start); ++start);
+    memmove(str, start, strlen(start) + 1);
+    for (end = str + strlen(str) - 1; end >= str && isspace(*end); --end);
+    *(end + 1) = '\0';
 }
