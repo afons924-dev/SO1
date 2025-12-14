@@ -181,16 +181,12 @@ void processar_comandos_clientes(char* cmd) {
     username[sizeof(username)-1] = '\0';
 
     char* tipo_cmd = strtok(NULL, " ");
-    if (!tipo_cmd) { // Comandos de uma só palavra (consultar, terminar)
-        // O cliente envia "pedro consultar", logo o token original 'cmd' tem o tipo de cmd
-        char* original_cmd = strchr(cmd, ' ');
-        if (original_cmd) {
-            original_cmd++; // Pula o espaço
-            if(strcmp(original_cmd, "consultar") == 0) consultar_viagens(username);
-            else if(strcmp(original_cmd, "terminar") == 0) remover_utilizador(username);
-        }
-    } else { // Comandos com argumentos
-        if (strcmp(tipo_cmd, "agendar") == 0) {
+    if (tipo_cmd) {
+        if (strcmp(tipo_cmd, "consultar") == 0) {
+            consultar_viagens(username);
+        } else if (strcmp(tipo_cmd, "terminar") == 0) {
+            remover_utilizador(username);
+        } else if (strcmp(tipo_cmd, "agendar") == 0) {
             char* hora_str = strtok(NULL, " ");
             if (hora_str) {
                 int hora = atoi(hora_str);
