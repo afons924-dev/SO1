@@ -64,13 +64,26 @@ void loop_principal() {
     open(FIFO_PRINCIPAL, O_WRONLY); fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
     printf("Controlador operacional.\n> "); fflush(stdout);
     time_t ultima_atualizacao = 0;
+
+    char admin_buffer[BUFFER_SIZE];
+    char cliente_buffer[BUFFER_SIZE];
+
     while (!terminar_flag) {
-        char buffer[BUFFER_SIZE];
-        if (read(STDIN_FILENO, buffer, sizeof(buffer)-1) > 0) processar_comandos_admin(buffer);
-        if (read(fd_fifo_principal, buffer, sizeof(buffer)-1) > 0) processar_comandos_clientes(buffer);
+        memset(admin_buffer, 0, BUFFER_SIZE);
+        if (read(STDIN_FILENO, admin_buffer, sizeof(admin_buffer)-1) > 0) {
+            processar_comandos_admin(admin_buffer);
+        }
+
+        memset(cliente_buffer, 0, BUFFER_SIZE);
+        if (read(fd_fifo_principal, cliente_buffer, sizeof(cliente_buffer)-1) > 0) {
+            processar_comandos_clientes(cliente_buffer);
+        }
+
         for (int i = 0; i < num_viagens; i++) {
             if (lista_viagens[i].estado == EM_CURSO && lista_viagens[i].fd_telemetria > 0) {
-                 char t_buf[256]; int n = read(lista_viagens[i].fd_telemetria, t_buf, sizeof(t_buf)-1);
+                 char t_buf[256];
+                 memset(t_buf, 0, sizeof(t_buf));
+                 int n = read(lista_viagens[i].fd_telemetria, t_buf, sizeof(t_buf)-1);
                  if (n > 0) {
                     t_buf[n] = '\0';
                     char* token = strtok(t_buf, "\n");
