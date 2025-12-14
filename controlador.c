@@ -42,6 +42,11 @@ int main() {
     return 0;
 }
 
+void handle_sigint(int sig) {
+    (void)sig;
+    terminar_flag = 1;
+}
+
 void inicializar_controlador() {
     int lock_fd = open(LOCK_FILE, O_CREAT | O_EXCL, 0666);
     if (lock_fd == -1) {
@@ -50,6 +55,10 @@ void inicializar_controlador() {
         exit(1);
     }
     close(lock_fd);
+
+    // Configura o handler para SIGINT (Ctrl+C)
+    signal(SIGINT, handle_sigint);
+
     printf("A iniciar o controlador...\n");
     char *nveiculos_env = getenv("NVEICULOS");
     nveiculos_max = nveiculos_env ? atoi(nveiculos_env) : MAX_VEICULOS_DEFAULT;
@@ -149,34 +158,52 @@ void processar_comandos_clientes(char* cmd) {
     char* cmd_copy = strdup(cmd);
     char* token = strtok(cmd_copy, " ");
     if (!token) { free(cmd_copy); return; }
+
+    // Comando LOGIN é um caso especial
     if (strcmp(token, "LOGIN") == 0) {
         char *user = strtok(NULL, " "); char *fifo = strtok(NULL, " ");
         if (user && fifo) adicionar_utilizador(user, fifo);
-    } else {
-        char username[50]; strncpy(username, token, sizeof(username) - 1);
-        username[sizeof(username)-1] = '\0';
-        char* tipo_cmd = strtok(NULL, " "); if (!tipo_cmd) { free(cmd_copy); return; }
+        free(cmd_copy);
+        return;
+    }
 
+    // Para os outros comandos, o primeiro token é o username
+    char username[50];
+    strncpy(username, token, sizeof(username) - 1);
+    username[sizeof(username)-1] = '\0';
+
+    char* tipo_cmd = strtok(NULL, " ");
+    if (!tipo_cmd) { // Comandos de uma só palavra (consultar, terminar)
+        // O cliente envia "pedro consultar", logo o token original 'cmd' tem o tipo de cmd
+        char* original_cmd = strchr(cmd, ' ');
+        if (original_cmd) {
+            original_cmd++; // Pula o espaço
+            if(strcmp(original_cmd, "consultar") == 0) consultar_viagens(username);
+            else if(strcmp(original_cmd, "terminar") == 0) remover_utilizador(username);
+        }
+    } else { // Comandos com argumentos
         if (strcmp(tipo_cmd, "agendar") == 0) {
-            char* resto = tipo_cmd + strlen(tipo_cmd) + 1;
             char* hora_str = strtok(NULL, " ");
             if (hora_str) {
                 int hora = atoi(hora_str);
+                char* resto = hora_str + strlen(hora_str) + 1;
                 char* p_dist = strrchr(resto, ' ');
                 if (p_dist) {
                     int dist = atoi(p_dist + 1);
                     *p_dist = '\0';
-                    char* local = hora_str + strlen(hora_str) + 1;
+                    char* local = resto;
                     while(isspace((unsigned char)*local)) local++;
                     agendar_viagem(username, hora, local, dist);
                 }
             }
-        } else if (strcmp(tipo_cmd, "consultar") == 0) consultar_viagens(username);
-        else if (strcmp(tipo_cmd, "cancelar") == 0) {
-            char* id_str = strtok(NULL, " "); if (id_str) cancelar_viagem(atoi(id_str), username);
-        } else if (strcmp(tipo_cmd, "terminar") == 0) remover_utilizador(username);
+        } else if (strcmp(tipo_cmd, "cancelar") == 0) {
+            char* id_str = strtok(NULL, " ");
+            if (id_str) cancelar_viagem(atoi(id_str), username);
+        }
     }
-    free(cmd_copy); printf("> "); fflush(stdout);
+
+    free(cmd_copy);
+    printf("> "); fflush(stdout);
 }
 
 void adicionar_utilizador(char* username, char* fifo_nome) {
