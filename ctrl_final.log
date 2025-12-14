@@ -7,10 +7,4 @@ User 'alice' adicionado.
 
 [CLIENTE] alice agendar 5 work 100
 Viagem 1 agendada para alice.
-> Veiculo 1: Cliente offline (FIFO nao aberto para leitura)
-Veiculo para viagem 1 (PID 6869) lancado.
-
-[T] Veiculo 1 iniciou.
->
-Viagem 1 CANCELADA (Erro no veiculo).
 >

@@ -116,7 +116,8 @@ int main(int argc, char *argv[]) {
         // O filho herda fd_fifo_cliente aberto.
         signal(SIGTERM, handle_sigint_cliente);
 
-        printf("\n[INFO] Estou à escuta de mensagens.\n");
+        printf("\n[INFO] Estou à escuta de mensagens (PID %d).\n", getpid());
+        fflush(stdout); // FORCE FLUSH
         char buffer_recebido[512];
         while ((n = read(fd_fifo_cliente, buffer_recebido, sizeof(buffer_recebido)-1)) > 0) {
             buffer_recebido[n] = '\0';
@@ -126,7 +127,7 @@ int main(int argc, char *argv[]) {
         // Se read retornar 0, o servidor fechou o FIFO (Logout ou Shutdown)
         printf("\nSessão terminada pelo servidor.\n");
         close(fd_fifo_cliente);
-        exit(0);
+        _exit(0); // Usa _exit para nao chamar atexit (não apagar FIFO)
     } else { // Pai: Envia comandos
         // O pai não precisa ler do FIFO do cliente
         close(fd_fifo_cliente);

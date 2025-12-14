@@ -340,19 +340,34 @@ void cancelar_viagem(int id_viagem, char* requisitante) {
 }
 
 void lancar_veiculo(Viagem *v) {
+    Utilizador* u = encontrar_utilizador(v->username_cliente);
+    if (!u) {
+        printf("Erro: Cliente '%s' nao encontrado. Cancelando viagem %d.\n", v->username_cliente, v->id);
+        v->estado = CANCELADA;
+        return;
+    }
+
+    // Verificar se o cliente esta contactavel
+    if (write(u->fd_fifo, " ", 1) == -1 && errno == EPIPE) {
+        printf("Erro: Cliente '%s' offline. Cancelando viagem %d.\n", v->username_cliente, v->id);
+        v->estado = CANCELADA;
+        close(u->fd_fifo);
+        remover_utilizador(u->username);
+        return;
+    }
+
     int p[2]; pipe(p); pid_t pid = fork();
     if (pid == 0) {
         close(p[0]); dup2(p[1], STDOUT_FILENO); close(p[1]);
         char d[10], id[10], fifo[100];
         snprintf(d, 10, "%d", v->distancia); snprintf(id, 10, "%d", v->id);
-        Utilizador* u = encontrar_utilizador(v->username_cliente);
-        snprintf(fifo, 100, "%s", u ? u->fifo_nome : "");
+        snprintf(fifo, 100, "%s", u->fifo_nome);
         execl("./veiculo", "veiculo", d, fifo, id, NULL); exit(1);
     }
     close(p[1]); v->pid_veiculo = pid; v->estado = EM_CURSO;
     v->fd_telemetria = p[0]; fcntl(v->fd_telemetria, F_SETFL, O_NONBLOCK);
-    veiculos_em_servico++; Utilizador* u = encontrar_utilizador(v->username_cliente);
-    if (u) u->em_viagem = 1;
+    veiculos_em_servico++;
+    u->em_viagem = 1;
     printf("Veiculo para viagem %d (PID %d) lancado.\n", v->id, pid);
 }
 
