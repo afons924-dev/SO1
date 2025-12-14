@@ -1,0 +1,22 @@
+A iniciar o controlador...
+Frota: 10 veículos.
+Controlador operacional.
+>
+[CLIENTE] LOGIN alice cliente_alice_fifo
+User 'alice' adicionado.
+
+[CLIENTE] LOGIN alice cliente_alice_fifo
+Detetada sessao morta para 'alice'. A limpar...
+Viagens agendadas para 'alice' canceladas.
+User 'alice' removido.
+User 'alice' adicionado.
+
+[CLIENTE] alice agendar 10 dest 100
+Viagem 1 agendada para alice.
+> Veiculo 1: Cliente offline (FIFO nao aberto para leitura)
+Veiculo para viagem 1 (PID 4922) lancado.
+
+[T] Veiculo 1 iniciou.
+>
+Viagem 1 CANCELADA (Erro no veiculo).
+>
