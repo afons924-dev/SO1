@@ -64,26 +64,15 @@ void loop_principal() {
     open(FIFO_PRINCIPAL, O_WRONLY); fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
     printf("Controlador operacional.\n> "); fflush(stdout);
     time_t ultima_atualizacao = 0;
-
-    char admin_buffer[BUFFER_SIZE];
-    char cliente_buffer[BUFFER_SIZE];
-
+    char admin_buffer[BUFFER_SIZE], cliente_buffer[BUFFER_SIZE];
     while (!terminar_flag) {
         memset(admin_buffer, 0, BUFFER_SIZE);
-        if (read(STDIN_FILENO, admin_buffer, sizeof(admin_buffer)-1) > 0) {
-            processar_comandos_admin(admin_buffer);
-        }
-
+        if (read(STDIN_FILENO, admin_buffer, sizeof(admin_buffer)-1) > 0) processar_comandos_admin(admin_buffer);
         memset(cliente_buffer, 0, BUFFER_SIZE);
-        if (read(fd_fifo_principal, cliente_buffer, sizeof(cliente_buffer)-1) > 0) {
-            processar_comandos_clientes(cliente_buffer);
-        }
-
+        if (read(fd_fifo_principal, cliente_buffer, sizeof(cliente_buffer)-1) > 0) processar_comandos_clientes(cliente_buffer);
         for (int i = 0; i < num_viagens; i++) {
             if (lista_viagens[i].estado == EM_CURSO && lista_viagens[i].fd_telemetria > 0) {
-                 char t_buf[256];
-                 memset(t_buf, 0, sizeof(t_buf));
-                 int n = read(lista_viagens[i].fd_telemetria, t_buf, sizeof(t_buf)-1);
+                 char t_buf[256]; memset(t_buf, 0, sizeof(t_buf)); int n = read(lista_viagens[i].fd_telemetria, t_buf, sizeof(t_buf)-1);
                  if (n > 0) {
                     t_buf[n] = '\0';
                     char* token = strtok(t_buf, "\n");
@@ -124,8 +113,7 @@ void loop_principal() {
 
 void processar_comandos_admin(char* cmd) {
     trim(cmd);
-    printf("\n[ADMIN] %s\n", cmd);
-    int id;
+    printf("\n[ADMIN] %s\n", cmd); int id;
     if (strcmp(cmd, "help") == 0) {
         printf("--- Comandos do Administrador ---\n");
         printf("  listar         - Mostra a informacao de todos os servicos agendados/em curso.\n");
@@ -158,24 +146,29 @@ void processar_comandos_admin(char* cmd) {
 void processar_comandos_clientes(char* cmd) {
     trim(cmd);
     printf("\n[CLIENTE] %s\n", cmd);
-    char* cmd_copy = strdup(cmd); char* token = strtok(cmd_copy, " ");
+    char* cmd_copy = strdup(cmd);
+    char* token = strtok(cmd_copy, " ");
     if (!token) { free(cmd_copy); return; }
     if (strcmp(token, "LOGIN") == 0) {
         char *user = strtok(NULL, " "); char *fifo = strtok(NULL, " ");
         if (user && fifo) adicionar_utilizador(user, fifo);
     } else {
         char username[50]; strncpy(username, token, sizeof(username) - 1);
+        username[sizeof(username)-1] = '\0';
         char* tipo_cmd = strtok(NULL, " "); if (!tipo_cmd) { free(cmd_copy); return; }
+
         if (strcmp(tipo_cmd, "agendar") == 0) {
+            char* resto = tipo_cmd + strlen(tipo_cmd) + 1;
             char* hora_str = strtok(NULL, " ");
             if (hora_str) {
                 int hora = atoi(hora_str);
-                char* inicio_local = hora_str + strlen(hora_str) + 1;
-                char* fim_local = strrchr(inicio_local, ' ');
-                if (fim_local && (fim_local != inicio_local)) {
-                    int dist = atoi(fim_local + 1); *fim_local = '\0';
-                    while(isspace((unsigned char)*inicio_local)) inicio_local++;
-                    agendar_viagem(username, hora, inicio_local, dist);
+                char* p_dist = strrchr(resto, ' ');
+                if (p_dist) {
+                    int dist = atoi(p_dist + 1);
+                    *p_dist = '\0';
+                    char* local = hora_str + strlen(hora_str) + 1;
+                    while(isspace((unsigned char)*local)) local++;
+                    agendar_viagem(username, hora, local, dist);
                 }
             }
         } else if (strcmp(tipo_cmd, "consultar") == 0) consultar_viagens(username);
@@ -205,8 +198,7 @@ void adicionar_utilizador(char* username, char* fifo_nome) {
 }
 
 void remover_utilizador(char* username) {
-    Utilizador* u = encontrar_utilizador(username);
-    if (!u) return;
+    Utilizador* u = encontrar_utilizador(username); if (!u) return;
     if (u->em_viagem) {
         write(u->fd_fifo, "Erro: Nao pode sair enquanto estiver em viagem.", 46);
         return;
@@ -219,9 +211,7 @@ void remover_utilizador(char* username) {
     printf("Viagens agendadas para '%s' canceladas.\n", username);
     int idx = u - lista_utilizadores;
     close(u->fd_fifo);
-    for(int i=idx; i<num_utilizadores-1; i++) {
-        lista_utilizadores[i] = lista_utilizadores[i+1];
-    }
+    for(int i=idx; i<num_utilizadores-1; i++) lista_utilizadores[i] = lista_utilizadores[i+1];
     num_utilizadores--;
     printf("User '%s' removido.\n", username);
 }
@@ -232,13 +222,19 @@ void agendar_viagem(char* username, int hora, char* local, int dist) {
         write(u->fd_fifo, "Erro: Nao pode agendar viagens para o passado.", 46);
         return;
     }
+    if (dist <= 0) {
+        write(u->fd_fifo, "Erro: A distancia deve ser um numero positivo.", 46);
+        return;
+    }
     if (num_viagens >= MAX_VIAGENS) {
         write(u->fd_fifo, "Erro: Sistema de agendamento cheio.", 35);
         return;
     }
     Viagem* v = &lista_viagens[num_viagens];
     v->id = proximo_id_viagem++; strcpy(v->username_cliente, username); v->hora_inicio = hora;
-    strcpy(v->local_partida, local); v->distancia = dist; v->estado = AGENDADA; v->progresso = 0;
+    strncpy(v->local_partida, local, sizeof(v->local_partida) - 1);
+    v->local_partida[sizeof(v->local_partida) - 1] = '\0';
+    v->distancia = dist; v->estado = AGENDADA; v->progresso = 0;
     num_viagens++; printf("Viagem %d agendada para %s.\n", v->id, username);
     char msg[100]; snprintf(msg, 100, "Viagem agendada com ID %d", v->id);
     write(u->fd_fifo, msg, strlen(msg));
@@ -256,9 +252,7 @@ void consultar_viagens(char* username) {
             if (len >= BUFFER_SIZE) break;
         }
     }
-    if (!encontrou) {
-        len += snprintf(buffer + len, BUFFER_SIZE - len, "Nao tem viagens agendadas.\n");
-    }
+    if (!encontrou) len += snprintf(buffer + len, BUFFER_SIZE - len, "Nao tem viagens agendadas.\n");
     write(u->fd_fifo, buffer, len);
 }
 
@@ -306,8 +300,7 @@ void terminar_sistema() {
         close(lista_utilizadores[i].fd_fifo);
     }
     for (int i=0; i<num_viagens; i++) if (lista_viagens[i].estado == EM_CURSO) kill(lista_viagens[i].pid_veiculo, SIGUSR1);
-    unlink(FIFO_PRINCIPAL);
-    unlink(LOCK_FILE);
+    unlink(FIFO_PRINCIPAL); unlink(LOCK_FILE);
     printf("Sistema terminado.\n");
 }
 
