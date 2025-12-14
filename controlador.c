@@ -99,6 +99,7 @@ void loop_principal() {
                                     veiculos_em_servico--; Utilizador* u = encontrar_utilizador(v->username_cliente);
                                     if (u) u->em_viagem = 0;
                                     close(v->fd_telemetria); v->fd_telemetria = -1;
+                                    waitpid(v->pid_veiculo, NULL, 0);
                                     printf("\nViagem %d %s.\n> ", id, tipo); fflush(stdout);
                                 }
                              }
