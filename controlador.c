@@ -101,6 +101,13 @@ void loop_principal() {
                                     close(v->fd_telemetria); v->fd_telemetria = -1;
                                     waitpid(v->pid_veiculo, NULL, 0);
                                     printf("\nViagem %d %s.\n> ", id, tipo); fflush(stdout);
+                                } else if (strcmp(tipo, "ERRO")==0) {
+                                    v->estado = CANCELADA;
+                                    veiculos_em_servico--; Utilizador* u = encontrar_utilizador(v->username_cliente);
+                                    if (u) u->em_viagem = 0;
+                                    close(v->fd_telemetria); v->fd_telemetria = -1;
+                                    waitpid(v->pid_veiculo, NULL, 0);
+                                    printf("\nViagem %d CANCELADA (Erro no veiculo).\n> ", id); fflush(stdout);
                                 }
                              }
                         }
@@ -214,9 +221,25 @@ void adicionar_utilizador(char* username, char* fifo_nome) {
         return;
     }
     if (encontrar_utilizador(username) != NULL) {
-        int fd_temp = open(fifo_nome, O_WRONLY);
-        if (fd_temp != -1) { write(fd_temp, "Erro: Username ja esta em uso.", 30); close(fd_temp); }
-        return;
+        // Verifica se o user existente está "vivo"
+        Utilizador* u_existente = encontrar_utilizador(username);
+        // Tenta escrever um espaço para ver se dá EPIPE (write de 0 bytes não deteta erro)
+        // Nota: signal(SIGPIPE, SIG_IGN) foi definido em inicializar_controlador()
+        if (write(u_existente->fd_fifo, " ", 1) == -1 && errno == EPIPE) {
+            // Cliente antigo morreu. Vamos removê-lo silenciosamente para permitir o novo login.
+            printf("Detetada sessao morta para '%s'. A limpar...\n", username);
+            close(u_existente->fd_fifo);
+            // Reutiliza o slot removendo
+            // (Chamar remover_utilizador tem side effects de print e cancelamento de viagens,
+            //  talvez seja melhor fazer aqui a limpeza especifica ou chamar remover e lidar com prints)
+            remover_utilizador(username);
+            // Agora prossegue para adicionar o novo.
+        } else {
+            // Cliente está vivo. Rejeita novo login.
+            int fd_temp = open(fifo_nome, O_WRONLY);
+            if (fd_temp != -1) { write(fd_temp, "Erro: Username ja esta em uso.", 30); close(fd_temp); }
+            return;
+        }
     }
     Utilizador* u = &lista_utilizadores[num_utilizadores];
     strcpy(u->username, username); strcpy(u->fifo_nome, fifo_nome); u->em_viagem = 0;
@@ -254,6 +277,18 @@ void agendar_viagem(char* username, int hora, char* local, int dist) {
         write(u->fd_fifo, "Erro: A distancia deve ser um numero positivo.", 46);
         return;
     }
+
+    // Verificar duplicados (mesmo user, mesma hora)
+    for (int i=0; i<num_viagens; i++) {
+        if (strcmp(lista_viagens[i].username_cliente, username) == 0 &&
+            (lista_viagens[i].estado == AGENDADA || lista_viagens[i].estado == EM_CURSO)) {
+            if (lista_viagens[i].hora_inicio == hora) {
+                 write(u->fd_fifo, "Erro: Ja tem viagem agendada para essa hora.", 44);
+                 return;
+            }
+        }
+    }
+
     if (num_viagens >= MAX_VIAGENS) {
         write(u->fd_fifo, "Erro: Sistema de agendamento cheio.", 35);
         return;
@@ -305,19 +340,34 @@ void cancelar_viagem(int id_viagem, char* requisitante) {
 }
 
 void lancar_veiculo(Viagem *v) {
+    Utilizador* u = encontrar_utilizador(v->username_cliente);
+    if (!u) {
+        printf("Erro: Cliente '%s' nao encontrado. Cancelando viagem %d.\n", v->username_cliente, v->id);
+        v->estado = CANCELADA;
+        return;
+    }
+
+    // Verificar se o cliente esta contactavel
+    if (write(u->fd_fifo, " ", 1) == -1 && errno == EPIPE) {
+        printf("Erro: Cliente '%s' offline. Cancelando viagem %d.\n", v->username_cliente, v->id);
+        v->estado = CANCELADA;
+        close(u->fd_fifo);
+        remover_utilizador(u->username);
+        return;
+    }
+
     int p[2]; pipe(p); pid_t pid = fork();
     if (pid == 0) {
         close(p[0]); dup2(p[1], STDOUT_FILENO); close(p[1]);
         char d[10], id[10], fifo[100];
         snprintf(d, 10, "%d", v->distancia); snprintf(id, 10, "%d", v->id);
-        Utilizador* u = encontrar_utilizador(v->username_cliente);
-        snprintf(fifo, 100, "%s", u ? u->fifo_nome : "");
+        snprintf(fifo, 100, "%s", u->fifo_nome);
         execl("./veiculo", "veiculo", d, fifo, id, NULL); exit(1);
     }
     close(p[1]); v->pid_veiculo = pid; v->estado = EM_CURSO;
     v->fd_telemetria = p[0]; fcntl(v->fd_telemetria, F_SETFL, O_NONBLOCK);
-    veiculos_em_servico++; Utilizador* u = encontrar_utilizador(v->username_cliente);
-    if (u) u->em_viagem = 1;
+    veiculos_em_servico++;
+    u->em_viagem = 1;
     printf("Veiculo para viagem %d (PID %d) lancado.\n", v->id, pid);
 }
 
