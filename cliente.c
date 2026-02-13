@@ -64,11 +64,24 @@ int main(int argc, char *argv[]) {
     atexit(cleanup_cliente);
     signal(SIGINT, handle_sigint_cliente);
 
-    // Tenta criar o FIFO. Se já existir, remove e recria.
-    // Nota: Em um sistema real, devíamos verificar se o FIFO pertence a um processo vivo.
-    // Aqui assumimos que se estamos a iniciar, queremos limpar o anterior.
-    // Mas se houver outro cliente a correr, vamos "roubar" o FIFO,
-    // mas o login vai falhar no servidor se já estiver logado.
+    // Verifica se o FIFO ja existe e esta a ser usado por outro processo (tem leitor)
+    int fd_test = open(fifo_cliente_nome, O_WRONLY | O_NONBLOCK);
+    if (fd_test != -1) {
+        // Se abriu com sucesso, ha um leitor do outro lado
+        close(fd_test);
+        fprintf(stderr, "Erro: O utilizador '%s' ja parece estar ativo (FIFO ocupado).\n", username);
+        // Impede que o atexit apague o FIFO que pertence a outro
+        fifo_cliente_nome[0] = '\0';
+        return 1;
+    }
+    // Se erro for diferente de ENXIO (existe mas sem leitor) e ENOENT (nao existe), e erro
+    if (errno != ENXIO && errno != ENOENT) {
+        perror("Erro ao verificar FIFO do cliente");
+        return 1;
+    }
+
+    // Se chegamos aqui, o FIFO ou nao existe, ou existe mas ninguem esta a ler (sessao morta).
+    // Podemos remover e recriar.
     unlink(fifo_cliente_nome);
     if (mkfifo(fifo_cliente_nome, 0666) == -1) {
         perror("Erro ao criar o FIFO do cliente");
